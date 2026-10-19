@@ -6,12 +6,36 @@ import { LuachCustomModal, LuachYidModal } from './LuachModals';
 
 type M = { type: string; data?: any } | null;
 
+const PAGES: [string, string][] = [
+  ['today', 'Today'],
+  ['week', 'This week'],
+  ['schedules', 'Schedules'],
+  ['people', 'People'],
+  ['luach', 'Luach'],
+  ['calls', 'Call log'],
+  ['settings', 'Settings'],
+];
+
+function pageFromHash() {
+  if (typeof window === 'undefined') return 'today';
+  const h = window.location.hash.replace('#', '');
+  return PAGES.some(([k]) => k === h) ? h : 'today';
+}
+
 export default function Dashboard() {
   const [d, setD] = useState<any>(null);
   const [loadErr, setLoadErr] = useState('');
   const [m, setM] = useState<M>(null);
   const [toastMsg, setToastMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  const [page, setPage] = useState('today');
+
+  useEffect(() => {
+    setPage(pageFromHash());
+    const f = () => { setPage(pageFromHash()); window.scrollTo(0, 0); };
+    window.addEventListener('hashchange', f);
+    return () => window.removeEventListener('hashchange', f);
+  }, []);
 
   const load = useCallback(async () => {
     try { setD(await api('/api/overview')); setLoadErr(''); } catch (e: any) { setLoadErr(e.message); }
@@ -45,183 +69,308 @@ export default function Dashboard() {
   }
 
   const st = d.status;
-  const needsSetup = !st.ha.ok || !st.twilio || st.lastTickAgoMin === null || st.lastTickAgoMin > 5;
+  const tickOk = st.lastTickAgoMin !== null && st.lastTickAgoMin <= 5;
+  const needsSetup = !st.ha.ok || !st.twilio || !tickOk;
   const todayRow = d.week.find((w: any) => w.today);
-  const callsThisWeek = d.week.reduce((n: number, w: any) => n + w.calls.length, 0);
+  const upcoming = d.week
+    .filter((w: any) => w.iso >= d.today.iso)
+    .flatMap((w: any) => w.calls.map((c: any) => ({ ...c, day: w.today ? 'Today' : w.eng })))
+    .filter((c: any) => new Date(c.at) > new Date())
+    .slice(0, 6);
+  const openSchedule = (id: number) => setM({ type: 'schedule', data: d.schedules.find((s: any) => s.id === id) });
+
+  const Title = ({ children, action }: any) => (
+    <div className="row" style={{ marginBottom: 18 }}>
+      <h1 style={{ margin: 0, fontSize: 28 }}>{children}</h1>
+      {action}
+    </div>
+  );
 
   return (
     <div className="app">
       <nav className="side" aria-label="Main">
         <div className="brand"><PhoneIcon /> Zmanim Caller</div>
-        <a href="#top">Overview</a>
-        <a href="#week">This week</a>
-        <a href="#schedules">Schedules</a>
-        <a href="#people">People</a>
-        <a href="#luach">Luach</a>
-        <a href="#calls">Call log</a>
-        <a href="#" onClick={(e) => { e.preventDefault(); setM({ type: 'settings' }); }}>Settings</a>
-        <div className="foot muted">Times from YidCal · Home Assistant</div>
+        {PAGES.map(([k, l]) => (
+          <a key={k} href={`#${k}`} className={page === k ? 'on' : ''} aria-current={page === k ? 'page' : undefined}>
+            {l}{k === 'settings' && needsSetup ? ' •' : ''}
+          </a>
+        ))}
+        <div className="foot muted">
+          <div className="heb" style={{ fontSize: 16, color: '#e8eaed' }}>{d.today.heb}</div>
+          {d.today.parsha}
+        </div>
       </nav>
 
-      <main className="main" id="top">
-        <div className="row">
-          <div>
-            <div className="heb" style={{ fontSize: 30, fontWeight: 700 }}>{d.today.heb} · {d.today.parsha}</div>
-            <div className="muted">{d.today.eng}</div>
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            <button type="button" className={`pill ${st.ha.ok ? 'p-ok' : 'p-bad'}`} style={{ border: 0, cursor: 'pointer' }} onClick={() => setM({ type: 'settings' })}>
-              {st.ha.ok ? '● HA connected' : '● HA not connected'}
-            </button>
-            <button type="button" className={`pill ${st.twilio ? 'p-ok' : 'p-bad'}`} style={{ border: 0, cursor: 'pointer' }} onClick={() => setM({ type: 'settings' })}>
-              {st.twilio ? '● Twilio ready' : '● Twilio not set up'}
-            </button>
-            <button type="button" className={`pill ${st.lastTickAgoMin !== null && st.lastTickAgoMin <= 5 ? 'p-ok' : 'p-warn'}`} style={{ border: 0, cursor: 'pointer' }} onClick={() => setM({ type: 'settings' })}>
-              {st.lastTickAgoMin === null ? '● Pinger not running' : st.lastTickAgoMin <= 5 ? '● Pinger running' : `● Pinger last ran ${st.lastTickAgoMin} min ago`}
-            </button>
-          </div>
-        </div>
+      <main className="main">
+        {page === 'today' && (
+          <>
+            <div className="row">
+              <div>
+                <div className="heb" style={{ fontSize: 30, fontWeight: 700 }}>{d.today.heb} · {d.today.parsha}</div>
+                <div className="muted">{d.today.eng}</div>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <a href="#settings" className={`pill ${st.ha.ok ? 'p-ok' : 'p-bad'}`} style={{ textDecoration: 'none' }}>{st.ha.ok ? '● HA connected' : '● HA not connected'}</a>
+                <a href="#settings" className={`pill ${st.twilio ? 'p-ok' : 'p-bad'}`} style={{ textDecoration: 'none' }}>{st.twilio ? '● Twilio ready' : '● Twilio not set up'}</a>
+                <a href="#settings" className={`pill ${tickOk ? 'p-ok' : 'p-warn'}`} style={{ textDecoration: 'none' }}>{tickOk ? '● Pinger running' : '● Pinger not running'}</a>
+              </div>
+            </div>
 
-        {needsSetup && (
-          <button type="button" className="card" style={{ marginTop: 18, borderColor: '#5c4a22', background: '#231f16' }} onClick={() => setM({ type: 'settings' })}>
-            <span className="ct">Finish setup</span>
-            <span className="cs">
-              {[!st.ha.ok && 'connect Home Assistant', !st.twilio && 'add Twilio details', (st.lastTickAgoMin === null || st.lastTickAgoMin > 5) && 'start the every-minute pinger'].filter(Boolean).join(' · ')}
-              {' '}— tap for steps
-            </span>
-          </button>
+            {needsSetup && (
+              <a href="#settings" className="card" style={{ marginTop: 18, borderColor: '#5c4a22', background: '#231f16', textDecoration: 'none' }}>
+                <span className="ct">Finish setup</span>
+                <span className="cs">
+                  {[!st.ha.ok && 'connect Home Assistant', !st.twilio && 'add Twilio details', !tickOk && 'start the every-minute pinger'].filter(Boolean).join(' · ')} — tap for steps
+                </span>
+              </a>
+            )}
+
+            <section className="hero">
+              {d.next ? (
+                <>
+                  <div>
+                    <div style={{ color: '#b3ddf8', fontSize: 14, fontWeight: 600 }}>NEXT CALL</div>
+                    <div className="t" style={{ fontSize: 34, margin: '2px 0' }}>{d.next.when}</div>
+                    <div style={{ fontSize: 17 }}>{d.next.name} → {d.next.who}</div>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                    <button type="button" className="btn" disabled={busy} onClick={() => act(d.next.id, 'now', `Call everyone in “${d.next.name}” right now?`)}>Call now</button>
+                    <button type="button" className="btn g" disabled={busy} onClick={() => act(d.next.id, 'skip', 'Skip this call? The schedule moves to its next time.')}>Skip this one</button>
+                    <button type="button" className="btn g" onClick={() => openSchedule(d.next.id)}>Details</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <div style={{ color: '#b3ddf8', fontSize: 14, fontWeight: 600 }}>NEXT CALL</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, margin: '2px 0' }}>Nothing planned yet</div>
+                    <div className="muted">Add people, then create a schedule.</div>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                    <a className="btn g" href="#people">Add people</a>
+                    <button type="button" className="btn" onClick={() => setM({ type: 'schedule', data: null })}>+ New schedule</button>
+                  </div>
+                </>
+              )}
+            </section>
+
+            <div className="tiles">
+              <div className="tile"><div className="lab">Candle lighting · {d.shabbos.erevDay}</div><div className="val t gold">{d.shabbos.candle || '—'}</div></div>
+              <div className="tile"><div className="lab">{d.shabbos.motzeiLabel}</div><div className="val t gold">{d.shabbos.havdalah || '—'}</div></div>
+              <div className="tile"><div className="lab">Maariv 60 · today</div><div className="val t">{todayRow?.maariv_60 || '—'}</div></div>
+              <div className="tile"><div className="lab">Sof Zman K”S MGA</div><div className="val t">{todayRow?.shma_mga || '—'}</div></div>
+            </div>
+            {st.zError && <p className="err" style={{ marginTop: 8 }}>Zmanim: {st.zError}</p>}
+
+            <div className="grid" style={{ marginTop: 20, gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
+              <section className="tile">
+                <div className="row" style={{ marginBottom: 6 }}><b>Coming up</b><a href="#week" style={{ fontSize: 14 }}>Whole week →</a></div>
+                {upcoming.length === 0 && <p className="muted" style={{ margin: 0 }}>No more calls this week.</p>}
+                {upcoming.map((c: any, i: number) => (
+                  <button type="button" key={i} className="zr" style={{ width: '100%', background: 'none', border: 0, borderTop: '1px solid #2c333c', color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer' }} onClick={() => openSchedule(c.id)}>
+                    <span>{c.name}</span><span className="t">{c.day} · {c.time}</span>
+                  </button>
+                ))}
+              </section>
+              <section className="tile">
+                <div className="row" style={{ marginBottom: 6 }}><b>Today’s zmanim</b><span className="muted" style={{ fontSize: 13 }}>from YidCal</span></div>
+                {d.todayZ.length === 0 && <p className="muted" style={{ margin: 0 }}>Not available right now.</p>}
+                {d.todayZ.map((z: any) => <div className="zr" key={z.key}><span className="heb" style={{ fontSize: 16 }}>{z.he}</span><span className="t">{z.text}</span></div>)}
+              </section>
+            </div>
+          </>
         )}
 
-        <section className="hero">
-          {d.next ? (
-            <>
-              <div>
-                <div style={{ color: '#b3ddf8', fontSize: 14, fontWeight: 600 }}>NEXT CALL</div>
-                <div className="t" style={{ fontSize: 34, margin: '2px 0' }}>{d.next.when}</div>
-                <div style={{ fontSize: 17 }}>{d.next.name} → {d.next.who}</div>
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                <button type="button" className="btn" disabled={busy} onClick={() => act(d.next.id, 'now', `Call everyone in “${d.next.name}” right now?`)}>Call now</button>
-                <button type="button" className="btn g" disabled={busy} onClick={() => act(d.next.id, 'skip', 'Skip this call? The schedule moves to its next time.')}>Skip this one</button>
-                <button type="button" className="btn g" onClick={() => setM({ type: 'schedule', data: d.schedules.find((s: any) => s.id === d.next.id) })}>Details</button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div>
-                <div style={{ color: '#b3ddf8', fontSize: 14, fontWeight: 600 }}>NEXT CALL</div>
-                <div style={{ fontSize: 22, fontWeight: 700, margin: '2px 0' }}>Nothing planned yet</div>
-                <div className="muted">Add people, then create a schedule.</div>
-              </div>
-              <button type="button" className="btn" onClick={() => setM({ type: 'schedule', data: null })}>+ New schedule</button>
-            </>
-          )}
-        </section>
+        {page === 'week' && (
+          <>
+            <Title>This week</Title>
+            <p className="muted" style={{ marginTop: -8 }}>Tap a day for its zmanim and calls.</p>
+            <div className="weekgrid">
+              {d.week.map((w: any) => (
+                <button type="button" key={w.iso} className={`day${w.today ? ' today' : ''}${w.noMelacha ? ' shab' : ''}`} onClick={() => setM({ type: 'day', data: w })}>
+                  <span style={{ fontSize: 12, color: '#9aa3ad', fontWeight: 600 }}>{w.eng}{w.today ? ' · TODAY' : ''}</span>
+                  <span className="heb" style={{ fontSize: 20 }}>{w.heb}</span>
+                  {w.notes.map((n: string) => <span key={n} className="heb gold" style={{ fontSize: 14 }}>{n}</span>)}
+                  {w.calls.map((c: any, i: number) => <span key={i} className="dot">{c.time} · {c.name}</span>)}
+                  {w.calls.length === 0 && <span className="muted" style={{ fontSize: 13 }}>{w.noMelacha ? 'No calls' : 'No calls planned'}</span>}
+                  {w.candle && <span style={{ fontSize: 13 }} className="muted">Candles {w.candle}</span>}
+                  {w.havdalah && <span style={{ fontSize: 13 }} className="muted">Motzei {w.havdalah}</span>}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
-        <div className="tiles">
-          <div className="tile"><div className="lab">Candle lighting · {d.shabbos.erevDay}</div><div className="val t gold">{d.shabbos.candle || '—'}</div></div>
-          <div className="tile"><div className="lab">{d.shabbos.motzeiLabel}</div><div className="val t gold">{d.shabbos.havdalah || '—'}</div></div>
-          <div className="tile"><div className="lab">Maariv 60 · today</div><div className="val t">{todayRow?.maariv_60 || '—'}</div></div>
-          <div className="tile"><div className="lab">Calls this week</div><div className="val t">{callsThisWeek}</div></div>
-        </div>
-        {st.zError && <p className="err" style={{ marginTop: 8 }}>Zmanim: {st.zError}</p>}
+        {page === 'schedules' && (
+          <>
+            <Title action={<button type="button" className="btn" onClick={() => setM({ type: 'schedule', data: null })}>+ New schedule</button>}>Schedules</Title>
+            <div className="grid">
+              {d.schedules.map((s: any) => (
+                <button type="button" key={s.id} className="card" onClick={() => setM({ type: 'schedule', data: s })}>
+                  <span className="row" style={{ alignItems: 'flex-start', gap: 8 }}>
+                    <span className="ct">{s.name}</span>
+                    <span className={`pill ${s.active ? (s.last_error && !s.next_run_at ? 'p-bad' : 'p-ok') : 'p-off'}`}>{s.active ? (s.last_error && !s.next_run_at ? 'Problem' : 'Active') : 'Paused'}</span>
+                  </span>
+                  <span className="cs">{s.when}</span>
+                  <span className="cs">{s.who}</span>
+                  <span style={{ fontSize: 14, marginTop: 6 }}>Next: <span className="t gold">{s.next}</span></span>
+                  {s.last_error && !s.next_run_at && <span className="err" style={{ fontSize: 13 }}>{s.last_error}</span>}
+                </button>
+              ))}
+              {d.schedules.length === 0 && <button type="button" className="card add" onClick={() => setM({ type: 'schedule', data: null })}><span className="ct">+ Create your first schedule</span></button>}
+            </div>
+          </>
+        )}
 
-        <div id="week" className="sec">This week · tap a day</div>
-        <div className="scrollx">
-          <div className="week">
-            {d.week.map((w: any) => (
-              <button type="button" key={w.iso} className={`day${w.today ? ' today' : ''}${w.noMelacha ? ' shab' : ''}`} onClick={() => setM({ type: 'day', data: w })}>
-                <span style={{ fontSize: 12, color: '#9aa3ad', fontWeight: 600 }}>{w.eng}{w.today ? ' · TODAY' : ''}</span>
-                <span className="heb" style={{ fontSize: 18 }}>{w.heb}</span>
-                {w.notes.map((n: string) => <span key={n} className="heb gold" style={{ fontSize: 13 }}>{n}</span>)}
-                {w.calls.map((c: any, i: number) => <span key={i} className="dot">{c.short} {c.name}</span>)}
-                {w.candle && <span style={{ fontSize: 12 }} className="muted">Candles {w.candle}</span>}
-                {w.havdalah && <span style={{ fontSize: 12 }} className="muted">Motzei {w.havdalah}</span>}
+        {page === 'people' && (
+          <>
+            <Title action={<div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}><button type="button" className="btn g" onClick={() => setM({ type: 'group', data: null })}>+ New group</button><button type="button" className="btn" onClick={() => setM({ type: 'person', data: null })}>+ Add person</button></div>}>People</Title>
+            <div className="sec" style={{ marginTop: 0 }}>Groups</div>
+            <div className="grid">
+              {d.people.groups.map((g: any) => (
+                <button type="button" key={g.id} className="card" onClick={() => setM({ type: 'group', data: g })}>
+                  <span className="ct">{g.name}</span>
+                  <span className="cs">{g.members.length} {g.members.length === 1 ? 'person' : 'people'}</span>
+                </button>
+              ))}
+              {d.people.groups.length === 0 && <p className="muted">No groups yet. Groups let one schedule call many people.</p>}
+            </div>
+            <div className="sec">Everyone ({d.people.contacts.length})</div>
+            <div className="grid">
+              {d.people.contacts.map((c: any) => (
+                <button type="button" key={c.id} className="card" onClick={() => setM({ type: 'person', data: c })}>
+                  <span className="ct">{c.name}</span>
+                  <span className="cs">{c.phone}</span>
+                  {c.groups.length > 0 && <span className="cs">{c.groups.map((gid: number) => d.people.groups.find((g: any) => g.id === gid)?.name).filter(Boolean).join(' · ')}</span>}
+                </button>
+              ))}
+              {d.people.contacts.length === 0 && <button type="button" className="card add" onClick={() => setM({ type: 'person', data: null })}><span className="ct">+ Add your first person</span></button>}
+            </div>
+          </>
+        )}
+
+        {page === 'luach' && (
+          <>
+            <Title>Luach</Title>
+            <div className="grid">
+              <button type="button" className="card" onClick={() => setM({ type: 'luachC' })}>
+                <span className="ct">Custom luach</span>
+                <span className="cs">Pick the zmanim and which parshas → printable PDF</span>
+                {d.layouts.length > 0 && <span className="gold" style={{ fontSize: 14, marginTop: 6 }}>Saved: {d.layouts.map((l: any) => l.name).join(' · ')}</span>}
               </button>
-            ))}
-          </div>
-        </div>
+              <button type="button" className="card" onClick={() => setM({ type: 'luachY' })}>
+                <span className="ct">YidCal luach</span>
+                <span className="cs">YidCal’s own weekly card, yearly sheet or yearly booklet</span>
+              </button>
+            </div>
+            <div className="sec">Recent PDFs</div>
+            <div className="grid">
+              {d.files.map((f: any) => (
+                <a key={f.id} className="card" href={f.url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                  <span className="ct" style={{ fontSize: 15 }}>{f.title}</span>
+                  <span className="cs">{fmtWhen(f.created_at)} · Open PDF</span>
+                </a>
+              ))}
+              {d.files.length === 0 && <p className="muted">None yet.</p>}
+            </div>
+          </>
+        )}
 
-        <div id="schedules" className="row">
-          <div className="sec">Schedules</div>
-          <button type="button" className="btn" onClick={() => setM({ type: 'schedule', data: null })}>+ New schedule</button>
-        </div>
-        <div className="grid">
-          {d.schedules.map((s: any) => (
-            <button type="button" key={s.id} className="card" onClick={() => setM({ type: 'schedule', data: s })}>
-              <span className="row" style={{ alignItems: 'flex-start', gap: 8 }}>
-                <span className="ct">{s.name}</span>
-                <span className={`pill ${s.active ? (s.last_error && !s.next_run_at ? 'p-bad' : 'p-ok') : 'p-off'}`}>{s.active ? (s.last_error && !s.next_run_at ? 'Problem' : 'Active') : 'Paused'}</span>
-              </span>
-              <span className="cs">{s.when}</span>
-              <span className="cs">{s.who}</span>
-              <span style={{ fontSize: 14, marginTop: 6 }}>Next: <span className="t gold">{s.next}</span></span>
-              {s.last_error && <span className="err" style={{ fontSize: 13 }}>{s.last_error}</span>}
-            </button>
-          ))}
-          {d.schedules.length === 0 && <button type="button" className="card add" onClick={() => setM({ type: 'schedule', data: null })}><span className="ct">+ Create your first schedule</span></button>}
-        </div>
-
-        <div id="people" className="sec">People &amp; groups</div>
-        <div className="grid">
-          <button type="button" className="card" onClick={() => setM({ type: 'people' })}>
-            <span className="ct">Everyone</span>
-            <span className="cs">{d.people.contacts.length} people</span>
-          </button>
-          {d.people.groups.map((g: any) => (
-            <button type="button" key={g.id} className="card" onClick={() => setM({ type: 'group', data: g })}>
-              <span className="ct">{g.name}</span>
-              <span className="cs">{g.members.length} {g.members.length === 1 ? 'person' : 'people'}</span>
-            </button>
-          ))}
-          <button type="button" className="card add" onClick={() => setM({ type: 'person', data: null })}><span className="ct">+ Add person</span></button>
-          <button type="button" className="card add" onClick={() => setM({ type: 'group', data: null })}><span className="ct">+ New group</span></button>
-        </div>
-
-        <div id="luach" className="sec">Luach</div>
-        <div className="grid">
-          <button type="button" className="card" onClick={() => setM({ type: 'luachC' })}>
-            <span className="ct">Custom luach</span>
-            <span className="cs">Pick zmanim + parshas → PDF</span>
-            {d.layouts.length > 0 && <span className="gold" style={{ fontSize: 14, marginTop: 6 }}>Saved: {d.layouts.map((l: any) => l.name).join(' · ')}</span>}
-          </button>
-          <button type="button" className="card" onClick={() => setM({ type: 'luachY' })}>
-            <span className="ct">YidCal luach</span>
-            <span className="cs">Weekly card · yearly sheet · yearly booklet</span>
-          </button>
-          {d.files.slice(0, 4).map((f: any) => (
-            <a key={f.id} className="card" href={f.url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
-              <span className="ct" style={{ fontSize: 15 }}>{f.title}</span>
-              <span className="cs">{fmtWhen(f.created_at)} · Open PDF</span>
-            </a>
-          ))}
-        </div>
-
-        <div id="calls" className="sec">Recent calls</div>
-        <div className="grid">
-          {d.calls.map((c: any) => (
-            <button type="button" key={c.id} className="card" onClick={() => setM({ type: 'call', data: c })}>
-              <span className="row" style={{ gap: 8 }}><span className="ct">{c.contact_name || '—'}</span><StatusPill status={c.status} /></span>
-              <span className="cs">{c.schedule_name}</span>
-              <span className="cs">{fmtWhen(c.created_at)}{c.duration ? ` · ${c.duration} sec` : ''}</span>
-            </button>
-          ))}
-          <button type="button" className="card add" onClick={() => setM({ type: 'calls' })}><span className="ct">View full call log</span></button>
-        </div>
+        {page === 'calls' && <CallsPage onOpen={(c: any) => setM({ type: 'call', data: c })} />}
+        {page === 'settings' && <SettingsPage status={st} toast={toast} reload={load} />}
       </main>
 
       {m?.type === 'schedule' && <ScheduleModal initial={m.data} people={d.people} onClose={close} onSaved={saved} toast={toast} />}
       {m?.type === 'day' && <DayModal day={m.data} onClose={close} />}
       {m?.type === 'person' && <PersonModal person={m.data} groups={d.people.groups} onClose={close} onSaved={saved} />}
-      {m?.type === 'people' && <PeopleModal people={d.people} onClose={close} onEdit={(p: any) => setM({ type: 'person', data: p })} />}
       {m?.type === 'group' && <GroupModal group={m.data} contacts={d.people.contacts} onClose={close} onSaved={saved} />}
       {m?.type === 'call' && <CallModal call={m.data} onClose={close} toast={toast} />}
-      {m?.type === 'calls' && <CallsModal onClose={close} onOpen={(c: any) => setM({ type: 'call', data: c })} />}
       {m?.type === 'luachC' && <LuachCustomModal onClose={close} layouts={d.layouts} onLayoutsChanged={load} toast={toast} />}
       {m?.type === 'luachY' && <LuachYidModal onClose={close} onDone={load} />}
-      {m?.type === 'settings' && <SettingsModal status={st} onClose={close} toast={toast} reload={load} />}
       {toastMsg && <div className="toast" role="status">{toastMsg}</div>}
     </div>
+  );
+}
+
+function CallsPage({ onOpen }: any) {
+  const [status, setStatus] = useState('');
+  const [data, setData] = useState<any>(null);
+  useEffect(() => { setData(null); api(`/api/calls?limit=200${status ? `&status=${status}` : ''}`).then(setData).catch(() => setData({ calls: [] })); }, [status]);
+  const count = (s: string) => data?.counts?.find((c: any) => c.status === s)?.n || 0;
+  return (
+    <>
+      <div className="row" style={{ marginBottom: 18 }}><h1 style={{ margin: 0, fontSize: 28 }}>Call log</h1></div>
+      <div className="tiles" style={{ marginTop: 0 }}>
+        <div className="tile"><div className="lab">Answered · 7 days</div><div className="val t" style={{ color: '#8ee0b0' }}>{count('answered')}</div></div>
+        <div className="tile"><div className="lab">Voicemail</div><div className="val t" style={{ color: '#f2d49b' }}>{count('voicemail')}</div></div>
+        <div className="tile"><div className="lab">Not reached</div><div className="val t" style={{ color: '#f2a8a3' }}>{count('no-answer') + count('busy') + count('failed')}</div></div>
+        <div className="tile"><div className="lab">Skipped</div><div className="val t">{count('skipped')}</div></div>
+      </div>
+      <div className="chips" style={{ margin: '18px 0 12px' }}>
+        {[['', 'All'], ['answered', 'Answered'], ['voicemail', 'Voicemail'], ['no-answer', 'No answer'], ['failed', 'Failed'], ['skipped', 'Skipped']].map(([k, l]) => (
+          <button type="button" key={k} className={`chip${status === k ? ' on' : ''}`} onClick={() => setStatus(k)}>{l}</button>
+        ))}
+      </div>
+      {!data && <p className="muted">Loading…</p>}
+      <div className="grid">
+        {data?.calls?.map((c: any) => (
+          <button type="button" key={c.id} className="card" onClick={() => onOpen(c)}>
+            <span className="row" style={{ gap: 8 }}><span className="ct">{c.contact_name || '—'}</span><StatusPill status={c.status} /></span>
+            <span className="cs">{c.schedule_name}</span>
+            <span className="cs">{fmtWhen(c.created_at)}{c.duration ? ` · ${c.duration} sec` : ''}{c.reason ? ` · ${c.reason}` : ''}</span>
+          </button>
+        ))}
+      </div>
+      {data && !data.calls?.length && <p className="muted">No calls yet.</p>}
+    </>
+  );
+}
+
+function SettingsPage({ status, toast, reload }: any) {
+  const [ha, setHa] = useState<any>(status.ha);
+  const [busy, setBusy] = useState(false);
+  async function testHa() {
+    setBusy(true);
+    try { setHa(await api('/api/settings', { body: { action: 'test_ha' } })); } catch (e: any) { setHa({ ok: false, message: e.message }); }
+    setBusy(false);
+  }
+  async function clearCache() {
+    setBusy(true);
+    try { await api('/api/settings', { body: { action: 'clear_cache' } }); toast('Zmanim refreshed from YidCal'); reload(); } catch (e: any) { toast(e.message); }
+    setBusy(false);
+  }
+  async function logout() { await api('/api/logout', { body: {} }); window.location.href = '/login'; }
+  const tickOk = status.lastTickAgoMin !== null && status.lastTickAgoMin <= 5;
+  const pinger = `${status.appUrl}/api/tick?key=YOUR_CRON_SECRET`;
+  return (
+    <>
+      <div className="row" style={{ marginBottom: 18 }}><h1 style={{ margin: 0, fontSize: 28 }}>Settings</h1></div>
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
+        <section className="tile">
+          <div className="row"><b>Home Assistant</b><span className={`pill ${ha.ok ? 'p-ok' : 'p-bad'}`}>{ha.ok ? 'Connected' : 'Not connected'}</span></div>
+          <p className="muted" style={{ fontSize: 14, wordBreak: 'break-word' }}>{ha.message}</p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" className="btn sm" disabled={busy} onClick={testHa}>Test connection</button>
+            <button type="button" className="btn g sm" disabled={busy} onClick={clearCache}>Refresh zmanim</button>
+          </div>
+        </section>
+        <section className="tile">
+          <div className="row"><b>Twilio</b><span className={`pill ${status.twilio ? 'p-ok' : 'p-bad'}`}>{status.twilio ? 'Ready' : 'Missing'}</span></div>
+          <p className="muted" style={{ fontSize: 14 }}>Set in Vercel: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM. Then redeploy.</p>
+        </section>
+        <section className="tile">
+          <div className="row"><b>Every-minute pinger</b><span className={`pill ${tickOk ? 'p-ok' : 'p-warn'}`}>{tickOk ? 'Running' : 'Not running'}</span></div>
+          <p className="muted" style={{ fontSize: 14 }}>{status.lastTick ? `Last ran ${fmtWhen(status.lastTick)}` : 'Hasn’t run yet.'} On cron-job.org, make a job that opens this address every 1 minute:</p>
+          <div className="box" style={{ wordBreak: 'break-all', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 13 }}>{pinger}</div>
+          <p className="muted" style={{ fontSize: 13 }}>Replace YOUR_CRON_SECRET with the CRON_SECRET value from Vercel.{!status.cronKeySet && ' (CRON_SECRET isn’t set yet.)'}</p>
+        </section>
+        <section className="tile">
+          <b>YidCal options this app needs</b>
+          <p className="muted" style={{ fontSize: 14 }}>HA → Settings → Devices &amp; Services → YidCal → gear: turn on “Zmanim Lookup &amp; service call sensors” and “Generate Luach (PDF) service”.</p>
+          <button type="button" className="btn g sm" onClick={logout}>Sign out</button>
+        </section>
+      </div>
+    </>
   );
 }
 
@@ -367,70 +516,3 @@ function CallModal({ call, onClose, toast }: any) {
   );
 }
 
-function CallsModal({ onClose, onOpen }: any) {
-  const [status, setStatus] = useState('');
-  const [data, setData] = useState<any>(null);
-  useEffect(() => { setData(null); api(`/api/calls?limit=200${status ? `&status=${status}` : ''}`).then(setData).catch(() => setData({ calls: [] })); }, [status]);
-  const count = (s: string) => data?.counts?.find((c: any) => c.status === s)?.n || 0;
-  return (
-    <Modal title="Call log" onClose={onClose} wide>
-      <div className="muted" style={{ fontSize: 14, marginBottom: 10 }}>
-        Last 7 days: {count('answered')} answered · {count('voicemail')} voicemail · {count('no-answer') + count('busy') + count('failed')} not reached · {count('skipped')} skipped
-      </div>
-      <div className="chips" style={{ marginBottom: 10 }}>
-        {[['', 'All'], ['answered', 'Answered'], ['voicemail', 'Voicemail'], ['no-answer', 'No answer'], ['failed', 'Failed'], ['skipped', 'Skipped']].map(([k, l]) => (
-          <button type="button" key={k} className={`chip${status === k ? ' on' : ''}`} onClick={() => setStatus(k)}>{l}</button>
-        ))}
-      </div>
-      <div className="list" style={{ maxHeight: '60vh' }}>
-        {!data && <p className="muted">Loading…</p>}
-        {data?.calls?.map((c: any) => (
-          <button type="button" key={c.id} className="zr" style={{ width: '100%', background: 'none', border: 0, borderTop: '1px solid #2c333c', color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer' }} onClick={() => onOpen(c)}>
-            <span><b>{c.contact_name || '—'}</b> · {c.schedule_name}<br /><span className="muted" style={{ fontSize: 13 }}>{fmtWhen(c.created_at)}{c.reason ? ` · ${c.reason}` : ''}</span></span>
-            <StatusPill status={c.status} />
-          </button>
-        ))}
-        {data && !data.calls?.length && <p className="muted">No calls yet.</p>}
-      </div>
-    </Modal>
-  );
-}
-
-function SettingsModal({ status, onClose, toast, reload }: any) {
-  const [ha, setHa] = useState<any>(status.ha);
-  const [busy, setBusy] = useState(false);
-  async function testHa() {
-    setBusy(true);
-    try { setHa(await api('/api/settings', { body: { action: 'test_ha' } })); } catch (e: any) { setHa({ ok: false, message: e.message }); }
-    setBusy(false);
-  }
-  async function clearCache() {
-    setBusy(true);
-    try { await api('/api/settings', { body: { action: 'clear_cache' } }); toast('Zmanim refreshed from YidCal'); reload(); } catch (e: any) { toast(e.message); }
-    setBusy(false);
-  }
-  async function logout() { await api('/api/logout', { body: {} }); window.location.href = '/login'; }
-  const pinger = `${status.appUrl}/api/tick?key=YOUR_CRON_SECRET`;
-  return (
-    <Modal title="Settings & setup" onClose={onClose}>
-      <div className="zr"><span><b>Home Assistant</b><br /><span className="muted" style={{ fontSize: 13 }}>{ha.message}</span></span><span className={`pill ${ha.ok ? 'p-ok' : 'p-bad'}`}>{ha.ok ? 'Connected' : 'Not connected'}</span></div>
-      <div className="zr"><span><b>Twilio</b><br /><span className="muted" style={{ fontSize: 13 }}>TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM</span></span><span className={`pill ${status.twilio ? 'p-ok' : 'p-bad'}`}>{status.twilio ? 'Ready' : 'Missing'}</span></div>
-      <div className="zr"><span><b>Every-minute pinger</b><br /><span className="muted" style={{ fontSize: 13 }}>{status.lastTick ? `Last ran ${fmtWhen(status.lastTick)}` : 'Hasn’t run yet'}</span></span><span className={`pill ${status.lastTickAgoMin !== null && status.lastTickAgoMin <= 5 ? 'p-ok' : 'p-warn'}`}>{status.lastTickAgoMin !== null && status.lastTickAgoMin <= 5 ? 'Running' : 'Not running'}</span></div>
-
-      <span className="lbl">Pinger URL (cron-job.org, every 1 minute)</span>
-      <div className="box" style={{ wordBreak: 'break-all', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 13 }}>{pinger}</div>
-      <p className="muted" style={{ fontSize: 13 }}>Replace YOUR_CRON_SECRET with the CRON_SECRET value from Vercel → Settings → Environment Variables.{!status.cronKeySet && ' (CRON_SECRET isn’t set yet.)'}</p>
-
-      <span className="lbl">YidCal options this app needs</span>
-      <p className="muted" style={{ fontSize: 14, margin: 0 }}>In HA: Settings → Devices &amp; Services → YidCal → gear icon → turn on “Zmanim Lookup &amp; service call sensors” and “Generate Luach (PDF) service”.</p>
-
-      <div className="foot-btns">
-        <button type="button" className="btn g" onClick={logout}>Sign out</button>
-        <div className="r">
-          <button type="button" className="btn g" disabled={busy} onClick={clearCache}>Refresh zmanim</button>
-          <button type="button" className="btn" disabled={busy} onClick={testHa}>Test HA</button>
-        </div>
-      </div>
-    </Modal>
-  );
-}

@@ -112,3 +112,14 @@ textarea.in { resize: vertical; line-height: 1.5; }
   body, html, .print-page { background: #fff !important; }
   @page { margin: 12mm; }
 }
+
+/* Separate pages */
+.side a.on { background: var(--accent-bg); color: var(--accent); }
+.weekgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.weekgrid .day { min-height: 170px; }
+@media (max-width: 760px) {
+  .side { position: sticky; top: 0; z-index: 20; flex-wrap: nowrap; overflow-x: auto; }
+  .side .brand { display: none; }
+  .side a { flex: none; }
+  .weekgrid { grid-template-columns: 1fr 1fr; }
+}
