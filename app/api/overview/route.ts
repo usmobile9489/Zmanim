@@ -32,6 +32,7 @@ export const GET = handle(async () => {
   if (ha.ok) {
     try { z = await lookupZmanim([...days, block.erev, ...block.days], ''); } catch (e: any) { zError = e?.message || String(e); }
   } else zError = ha.message;
+  if (zError) console.error('[overview] HA/zmanim problem:', zError, '| HA ping:', JSON.stringify(ha));
 
   // Calls planned this week.
   const weekFrom = fromISODate(ws);

@@ -19,7 +19,8 @@ async function haFetch(path: string, init: RequestInit = {}, timeoutMs = 20000) 
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`Home Assistant ${res.status}: ${text.slice(0, 200)}`);
+    const hint = res.status === 401 ? ' (HA_TOKEN rejected)' : res.status === 403 && /cloudflare|cf-/i.test(text + JSON.stringify([...res.headers])) ? ' (blocked by Cloudflare before reaching HA)' : '';
+    throw new Error(`Home Assistant ${res.status}${hint}: ${text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 160)}`);
   }
   return res;
 }
