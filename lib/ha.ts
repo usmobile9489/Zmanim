@@ -31,7 +31,9 @@ export async function haPing() {
     const j = await r.json();
     return { ok: true, message: j?.message || 'ok' };
   } catch (e: any) {
-    return { ok: false, message: e?.message || String(e) };
+    const cause = e?.cause?.code || e?.cause?.message || '';
+    const msg = e?.name === 'TimeoutError' ? 'Timed out reaching HA_URL' : e?.message || String(e);
+    return { ok: false, message: cause ? `${msg} (${cause})` : msg };
   }
 }
 
